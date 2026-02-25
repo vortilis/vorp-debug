@@ -1,5 +1,7 @@
 FROM debian:12-slim
 
+LABEL org.opencontainers.image.source="https://github.com/vortilis/vorp-debug"
+
 ARG KUBE_VERSION="v1.35.0"
 ARG YQ_VERSION="v4.44.6"
 ARG TARGETARCH
