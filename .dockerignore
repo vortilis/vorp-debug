@@ -1,0 +1,11 @@
+.git
+.github
+k8s
+README.md
+LICENSE
+Makefile
+.gitignore
+.dockerignore
+CLAUDE.md
+.claude/
+.DS_Store

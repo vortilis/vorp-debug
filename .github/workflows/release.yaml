@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show release info
+        run: |
+          echo "=== Release Info ==="
+          echo "Tag:      ${{ github.ref_name }}"
+          echo "SHA:      ${{ github.sha }}"
+          echo "Actor:    ${{ github.actor }}"
+          KUBE_VERSION=$(sed -n 's/.*KUBE_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' Dockerfile)
+          echo "Kube:     v${KUBE_VERSION}"
+          echo "Platform: linux/amd64,linux/arm64"
+          echo "Registry: ghcr.io/vortilis/vorp-debug"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/vortilis/vorp-debug
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Show tags to be pushed
+        run: |
+          echo "=== Tags ==="
+          echo "${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "=== Labels ==="
+          echo "${{ steps.meta.outputs.labels }}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify pushed image
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "=== Verifying ghcr.io/vortilis/vorp-debug:${VERSION} ==="
+          docker manifest inspect "ghcr.io/vortilis/vorp-debug:${VERSION}" | jq '.manifests[] | {platform: .platform, digest: .digest}'

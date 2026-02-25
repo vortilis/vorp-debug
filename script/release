@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE="ghcr.io/vortilis/vorp-debug"
+PLATFORMS="linux/amd64,linux/arm64"
+GHCR_USER="vormmt"
+
+# Load token from .env
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    source "$ENV_FILE"
+fi
+
+# Version from Dockerfile is the source of truth
+DOCKERFILE_VERSION=$(sed -n 's/.*KUBE_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' Dockerfile)
+
+if [[ -z "$DOCKERFILE_VERSION" ]]; then
+    echo "Error: could not read KUBE_VERSION from Dockerfile"
+    exit 1
+fi
+
+VERSION="$DOCKERFILE_VERSION"
+TAG="v$VERSION"
+
+# Check git tag matches Dockerfile
+GIT_TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+if [[ -n "$GIT_TAG" && "$GIT_TAG" != "$TAG" ]]; then
+    echo "Warning: git tag ($GIT_TAG) != Dockerfile version ($TAG)"
+    echo "Using Dockerfile version: $TAG"
+fi
+
+if [[ -z "$GIT_TAG" ]]; then
+    echo "Note: no git tag on current commit."
+    echo "Consider: git tag $TAG && git push origin $TAG"
+    echo ""
+fi
+
+MAJOR="${VERSION%%.*}"
+MINOR="${VERSION#*.}"
+MINOR="${MINOR%%.*}"
+
+echo "=== Release: $TAG ==="
+echo "Image:     $IMAGE"
+echo "Platforms: $PLATFORMS"
+echo "Tags:"
+echo "  - $IMAGE:$VERSION"
+echo "  - $IMAGE:$MAJOR.$MINOR"
+echo "  - $IMAGE:latest"
+echo ""
+
+# Login to GHCR
+if [[ -z "${GH_PAT:-}" ]]; then
+    echo "Error: GH_PAT not set. Add it to .env or export it."
+    exit 1
+fi
+echo "$GH_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+echo "Building and pushing..."
+docker buildx build \
+    --platform "$PLATFORMS" \
+    --push \
+    -t "$IMAGE:$VERSION" \
+    -t "$IMAGE:$MAJOR.$MINOR" \
+    -t "$IMAGE:latest" \
+    .
+
+echo ""
+echo "=== Done ==="
+echo "Verify: docker manifest inspect $IMAGE:$VERSION"

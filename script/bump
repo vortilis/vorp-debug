@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOCKERFILE="Dockerfile"
+
+current_version() {
+    sed -n 's/.*KUBE_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' "$DOCKERFILE"
+}
+
+check_release_exists() {
+    local version="$1"
+    local url="$2"
+    local name="$3"
+
+    if ! curl -fsSL --head "$url" >/dev/null 2>&1; then
+        echo "Error: $name v$version not found at:"
+        echo "  $url"
+        exit 1
+    fi
+    echo "  $name v$version  OK"
+}
+
+CURRENT=$(current_version)
+
+if [[ $# -lt 1 ]]; then
+    echo "Current version: v$CURRENT"
+    echo ""
+    echo "Usage: $0 <new-version>"
+    echo "  $0 1.32.0"
+    echo "  $0 v1.32.0"
+    exit 0
+fi
+
+NEW="${1#v}"
+
+if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: '$1' is not a valid semver (expected X.Y.Z)"
+    exit 1
+fi
+
+if [[ "$NEW" == "$CURRENT" ]]; then
+    echo "Already at v$CURRENT, nothing to do."
+    exit 0
+fi
+
+echo "Checking that v$NEW releases exist..."
+check_release_exists "$NEW" \
+    "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${NEW}/crictl-v${NEW}-linux-amd64.tar.gz" \
+    "crictl"
+check_release_exists "$NEW" \
+    "https://dl.k8s.io/release/v${NEW}/bin/linux/amd64/kubectl" \
+    "kubectl"
+echo ""
+
+echo "Bumping: v$CURRENT → v$NEW"
+
+# Update Dockerfile
+sed -i '' "s/KUBE_VERSION=\"v${CURRENT}\"/KUBE_VERSION=\"v${NEW}\"/" "$DOCKERFILE"
+
+# Verify the change
+AFTER=$(current_version)
+if [[ "$AFTER" != "$NEW" ]]; then
+    echo "Error: version update failed in $DOCKERFILE"
+    exit 1
+fi
+
+echo "Updated $DOCKERFILE"
+echo ""
+echo "Next steps:"
+echo "  git add $DOCKERFILE"
+echo "  git commit -m \"Bump kube tools to v$NEW\""
+echo "  git tag v$NEW"
+echo "  ./script/release"

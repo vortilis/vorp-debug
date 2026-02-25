@@ -1,0 +1,8 @@
+.DS_Store
+*.swp
+*.swo
+*~
+.env
+CLAUDE.md
+.claude/
+k8s/
