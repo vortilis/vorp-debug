@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="ghcr.io/vortilis/vorp-debug"
+REGISTRY="ghcr.io/vortilis"
+# Dockerfile target → image name
+TARGETS=(debug shell)
 PLATFORMS="linux/amd64,linux/arm64"
 GHCR_USER="vormmt"
 
@@ -40,12 +42,14 @@ MINOR="${VERSION#*.}"
 MINOR="${MINOR%%.*}"
 
 echo "=== Release: $TAG ==="
-echo "Image:     $IMAGE"
 echo "Platforms: $PLATFORMS"
 echo "Tags:"
-echo "  - $IMAGE:$VERSION"
-echo "  - $IMAGE:$MAJOR.$MINOR"
-echo "  - $IMAGE:latest"
+for target in "${TARGETS[@]}"; do
+    IMAGE="$REGISTRY/vorp-$target"
+    echo "  - $IMAGE:$VERSION"
+    echo "  - $IMAGE:$MAJOR.$MINOR"
+    echo "  - $IMAGE:latest"
+done
 echo ""
 
 # Login to GHCR
@@ -55,15 +59,21 @@ if [[ -z "${GH_PAT:-}" ]]; then
 fi
 echo "$GH_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
-echo "Building and pushing..."
-docker buildx build \
-    --platform "$PLATFORMS" \
-    --push \
-    -t "$IMAGE:$VERSION" \
-    -t "$IMAGE:$MAJOR.$MINOR" \
-    -t "$IMAGE:latest" \
-    .
+for target in "${TARGETS[@]}"; do
+    IMAGE="$REGISTRY/vorp-$target"
+    echo "Building and pushing $IMAGE..."
+    docker buildx build \
+        --platform "$PLATFORMS" \
+        --target "$target" \
+        --push \
+        -t "$IMAGE:$VERSION" \
+        -t "$IMAGE:$MAJOR.$MINOR" \
+        -t "$IMAGE:latest" \
+        .
+done
 
 echo ""
 echo "=== Done ==="
-echo "Verify: docker manifest inspect $IMAGE:$VERSION"
+for target in "${TARGETS[@]}"; do
+    echo "Verify: docker manifest inspect $REGISTRY/vorp-$target:$VERSION"
+done

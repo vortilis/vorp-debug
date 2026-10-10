@@ -7,6 +7,14 @@ current_version() {
     sed -n 's/.*KUBE_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' "$DOCKERFILE"
 }
 
+current_crictl() {
+    sed -n 's/.*CRICTL_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' "$DOCKERFILE"
+}
+
+crictl_url() {
+    echo "https://github.com/kubernetes-sigs/cri-tools/releases/download/v$1/crictl-v$1-linux-amd64.tar.gz"
+}
+
 check_release_exists() {
     local version="$1"
     local url="$2"
@@ -20,10 +28,24 @@ check_release_exists() {
     echo "  $name v$version  OK"
 }
 
+# crictl has no release for every kubectl patch: take the newest patch of
+# the same minor (X.Y.0, X.Y.1, ... until the first missing one).
+latest_crictl_patch() {
+    local minor="$1"
+    local patch=0
+    local found=""
+    while curl -fsSL --head "$(crictl_url "$minor.$patch")" >/dev/null 2>&1; do
+        found="$minor.$patch"
+        patch=$((patch + 1))
+    done
+    echo "$found"
+}
+
 CURRENT=$(current_version)
+CURRENT_CRICTL=$(current_crictl)
 
 if [[ $# -lt 1 ]]; then
-    echo "Current version: v$CURRENT"
+    echo "Current version: v$CURRENT (crictl v$CURRENT_CRICTL)"
     echo ""
     echo "Usage: $0 <new-version>"
     echo "  $0 1.32.0"
@@ -45,21 +67,25 @@ fi
 
 echo "Checking that v$NEW releases exist..."
 check_release_exists "$NEW" \
-    "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${NEW}/crictl-v${NEW}-linux-amd64.tar.gz" \
-    "crictl"
-check_release_exists "$NEW" \
     "https://dl.k8s.io/release/v${NEW}/bin/linux/amd64/kubectl" \
     "kubectl"
+CRICTL=$(latest_crictl_patch "${NEW%.*}")
+if [[ -z "$CRICTL" ]]; then
+    echo "Error: no crictl release for v${NEW%.*} at:"
+    echo "  $(crictl_url "${NEW%.*}.0")"
+    exit 1
+fi
+echo "  crictl v$CRICTL  OK"
 echo ""
 
-echo "Bumping: v$CURRENT → v$NEW"
+echo "Bumping: kubectl v$CURRENT → v$NEW, crictl v$CURRENT_CRICTL → v$CRICTL"
 
 # Update Dockerfile
 sed -i '' "s/KUBE_VERSION=\"v${CURRENT}\"/KUBE_VERSION=\"v${NEW}\"/" "$DOCKERFILE"
+sed -i '' "s/CRICTL_VERSION=\"v${CURRENT_CRICTL}\"/CRICTL_VERSION=\"v${CRICTL}\"/" "$DOCKERFILE"
 
 # Verify the change
-AFTER=$(current_version)
-if [[ "$AFTER" != "$NEW" ]]; then
+if [[ "$(current_version)" != "$NEW" || "$(current_crictl)" != "$CRICTL" ]]; then
     echo "Error: version update failed in $DOCKERFILE"
     exit 1
 fi
@@ -70,4 +96,5 @@ echo "Next steps:"
 echo "  git add $DOCKERFILE"
 echo "  git commit -m \"Bump kube tools to v$NEW\""
 echo "  git tag v$NEW"
-echo "  ./script/release"
+echo "  git push origin v$NEW   # GitHub Actions publishes both images"
+echo "  (or ./script/release to publish from this machine)"

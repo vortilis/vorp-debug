@@ -29,6 +29,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: debug
           platforms: linux/amd64,linux/arm64
           push: false
 
@@ -36,6 +37,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: debug
           load: true
           tags: vorp-debug:test
 
@@ -51,6 +53,51 @@ jobs:
             echo ""
             echo "=== Versions ==="
             crictl --version
+            kubectl version --client
+            echo ""
+            echo "=== Image info ==="
+            cat /etc/os-release | head -3
+            uname -m
+            echo "=== All checks passed ==="
+          '
+
+      - name: Build shell multi-platform (verify both arches)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: shell
+          platforms: linux/amd64,linux/arm64
+          push: false
+
+      - name: Build shell for smoke test (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: shell
+          load: true
+          tags: vorp-shell:test
+
+      # Runs as the image's own user: the shell image must work without root.
+      - name: Smoke test shell
+        run: |
+          docker run --rm vorp-shell:test sh -c '
+            set -e
+            echo "=== Checking user ==="
+            [ "$(id -u)" = 65532 ] || { echo "runs as uid $(id -u), expected 65532"; exit 1; }
+            id
+            echo "=== Checking tools ==="
+            for tool in dig curl wget ping traceroute ip ss ncat telnet openssl socat kubectl jq yq vim tmux less ps; do
+              printf "  %-12s" "$tool"
+              path=$(which "$tool" 2>/dev/null) && echo "OK  ($path)" || { echo "MISSING"; exit 1; }
+            done
+            for tool in tcpdump crictl strace bpftool iptables; do
+              printf "  %-12s" "$tool"
+              which "$tool" >/dev/null 2>&1 && { echo "UNEXPECTED (debug-only tool)"; exit 1; } || echo "absent"
+            done
+            echo "=== Checking writable HOME ($HOME) ==="
+            mkdir -p "$HOME/.kube/cache" && rm -rf "$HOME/.kube"
+            echo ""
+            echo "=== Versions ==="
             kubectl version --client
             echo ""
             echo "=== Image info ==="

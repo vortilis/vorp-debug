@@ -24,7 +24,7 @@ jobs:
           KUBE_VERSION=$(sed -n 's/.*KUBE_VERSION="v\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' Dockerfile)
           echo "Kube:     v${KUBE_VERSION}"
           echo "Platform: linux/amd64,linux/arm64"
-          echo "Registry: ghcr.io/vortilis/vorp-debug"
+          echo "Images:   ghcr.io/vortilis/vorp-debug, ghcr.io/vortilis/vorp-shell"
 
       - uses: docker/setup-qemu-action@v3
 
@@ -47,18 +47,35 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      - name: Extract metadata (shell)
+        id: meta-shell
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/vortilis/vorp-shell
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+          # Title and description default to the repository's (vorp-debug)
+          labels: |
+            org.opencontainers.image.title=vorp-shell
+            org.opencontainers.image.description=Kubernetes shell: kubectl and network tools as a non-root user
+
       - name: Show tags to be pushed
         run: |
           echo "=== Tags ==="
           echo "${{ steps.meta.outputs.tags }}"
+          echo "${{ steps.meta-shell.outputs.tags }}"
           echo ""
           echo "=== Labels ==="
           echo "${{ steps.meta.outputs.labels }}"
+          echo "${{ steps.meta-shell.outputs.labels }}"
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: debug
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -66,9 +83,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify pushed image
+      # Own cache scope: two builds writing one scope would evict each other.
+      - name: Build and push (shell)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: shell
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-shell.outputs.tags }}
+          labels: ${{ steps.meta-shell.outputs.labels }}
+          cache-from: type=gha,scope=vorp-shell
+          cache-to: type=gha,mode=max,scope=vorp-shell
+
+      - name: Verify pushed images
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
-          echo "=== Verifying ghcr.io/vortilis/vorp-debug:${VERSION} ==="
-          docker manifest inspect "ghcr.io/vortilis/vorp-debug:${VERSION}" | jq '.manifests[] | {platform: .platform, digest: .digest}'
+          for image in vorp-debug vorp-shell; do
+            echo "=== Verifying ghcr.io/vortilis/${image}:${VERSION} ==="
+            docker manifest inspect "ghcr.io/vortilis/${image}:${VERSION}" | jq '.manifests[] | {platform: .platform, digest: .digest}'
+          done
